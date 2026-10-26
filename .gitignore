@@ -1,0 +1,4 @@
+# Dữ liệu Facebook / sao lưu cá nhân — không bao giờ đưa lên GitHub
+*.zip
+facebook-*/
+saoluu-*.json
