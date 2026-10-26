@@ -162,8 +162,8 @@
     <div class="field"><label>Tên repo chứa dữ liệu (repo riêng tư)</label><input id="sRepo" autocapitalize="off" autocorrect="off" placeholder="donbanh-data"></div>
     <div class="field"><label>GitHub token</label><input id="sToken" type="password" autocapitalize="off" placeholder="github_pat_..."></div>
     <div class="field"><label>Gemini API key (lấy miễn phí tại aistudio.google.com)</label><input id="sAiKey" type="password" autocapitalize="off" placeholder="AIza..."></div>
-    <div class="field"><label>Menu &amp; giá (mỗi dòng một món, AI dùng để điền giá và gọi tên đồng nhất)</label>
-      <textarea id="sMenu" rows="6" placeholder="Bông lan trứng muối | 16cm | 350000&#10;Bông lan trứng muối | 20cm | 450000&#10;Su kem | hộp 10 | 60000"></textarea></div>
+    <div class="field"><label>Menu &amp; giá: mỗi dòng một món, dạng Tên | size | giá | tên khách hay gọi tắt (cách nhau dấu phẩy)</label>
+      <textarea id="sMenu" rows="6" placeholder="Bông lan trứng muối | 16cm | 350000 | bltm, bông lan, bl trứng muối&#10;Bông lan trứng muối | 20cm | 450000&#10;Su kem | hộp 10 | 60000 | su, bánh su"></textarea></div>
     <div class="row">
       <button class="primary" onclick="saveSettings()">Lưu &amp; kiểm tra</button>
       <button onclick="$('settings').close()">Đóng</button>
@@ -420,18 +420,156 @@ async function aiParse(parts) {
   return JSON.parse(text);
 }
 
-async function runAI(content) {
-  $('aiMsg').textContent = '🤖 Đang đọc...';
+// rawText: văn bản tin nhắn (null nếu là ảnh) — dùng cho bộ đọc offline khi Gemini lỗi
+async function runAI(content, rawText) {
   $('aiNotice').textContent = '';
+  if (!cfg.geminiKey && rawText) {
+    fillFromAI(offlineParse(rawText));
+    $('aiMsg').textContent = '✓ Đã đọc bằng bộ offline (chưa có Gemini key), kiểm tra kỹ rồi bấm Lưu đơn';
+    return;
+  }
+  $('aiMsg').textContent = '🤖 Đang đọc...';
   $('btnPaste').disabled = true;
   try {
     fillFromAI(await aiParse(content));
     $('aiMsg').textContent = '✓ Đã điền sẵn, kiểm tra rồi bấm Lưu đơn';
   } catch (e) {
-    $('aiMsg').textContent = '⚠ ' + (e.message || 'Lỗi');
+    if (rawText) {
+      fillFromAI(offlineParse(rawText));
+      $('aiMsg').textContent = `⚠ Gemini lỗi (${e.message || 'không rõ'}), đã đọc bằng bộ offline, kiểm tra kỹ rồi bấm Lưu đơn`;
+    } else $('aiMsg').textContent = '⚠ ' + (e.message || 'Lỗi') + '. Ảnh chụp cần Gemini, hãy copy tin nhắn thay vì chụp ảnh';
   } finally {
     $('btnPaste').disabled = false;
   }
+}
+
+// ---------- bộ đọc offline (không cần AI) ----------
+// bỏ dấu, giữ nguyên độ dài chuỗi để lấy lại đoạn gốc có dấu theo vị trí
+function fold(s) {
+  return Array.from(String(s || '').normalize('NFC'), ch => {
+    if (ch === 'đ' || ch === 'Đ') return 'd';
+    const b = ch.normalize('NFD')[0].toLowerCase();
+    return b.length === ch.length ? b : ch;
+  }).join('');
+}
+const reEsc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const WB = '(?<![a-z0-9])', WE = '(?![a-z0-9])';
+
+// danh mục bánh: từ Menu & giá (Tên | size | giá | tên gọi tắt, ...) và từ các đơn cũ
+function buildCatalog() {
+  const cakes = new Map();
+  const get = name => {
+    const k = fold(norm(name));
+    if (!cakes.has(k)) cakes.set(k, { name: norm(name), terms: new Set([k]), sizes: new Map() });
+    return cakes.get(k);
+  };
+  const addSize = (c, size, price) => {
+    if (!size) return;
+    const k = fold(size);
+    if (!c.sizes.has(k) || price) c.sizes.set(k, { size, price: price || c.sizes.get(k)?.price || 0 });
+  };
+  for (const o of live().sort((a, b) => a.date.localeCompare(b.date)))
+    for (const i of o.items) { const c = get(i.cake); addSize(c, i.size, i.price); }
+  for (const line of (db.menu || '').split('\n')) {
+    const p = line.split('|').map(norm);
+    if (!p[0]) continue;
+    let [name, size = '', price = '', alias = ''] = p;
+    if (p.length === 2 && /^[\d.,\s]+(k|đ|d)?$/i.test(size)) { price = size; size = ''; }
+    const c = get(name);
+    c.name = name;
+    let money = parseMoney(price);
+    if (/k$/i.test(price)) money *= 1000;
+    if (size) addSize(c, size, money); else c.price = money;
+    alias.split(',').map(a => fold(norm(a))).filter(Boolean).forEach(a => c.terms.add(a));
+  }
+  return [...cakes.values()];
+}
+
+function offlineParse(text) {
+  text = String(text).normalize('NFC');
+  const f = fold(text);
+  const catalog = buildCatalog();
+
+  // 1. tìm tên bánh, ưu tiên tên dài nhất, không chồng lên nhau
+  const terms = catalog.flatMap(c => [...c.terms].map(t => ({ t, c }))).sort((a, b) => b.t.length - a.t.length);
+  const hits = [];
+  for (const { t, c } of terms) {
+    const re = new RegExp(WB + reEsc(t).replace(/ /g, '\\s+') + WE, 'g');
+    for (const m of f.matchAll(re)) {
+      const s = m.index, e = s + m[0].length;
+      if (!hits.some(h => s < h.e && e > h.s)) hits.push({ s, e, c });
+    }
+  }
+  hits.sort((a, b) => a.s - b.s);
+
+  // 2. với mỗi tên bánh: tìm size, số lượng trong đoạn ngay sau (và số lượng ngay trước)
+  const items = [];
+  hits.forEach((h, idx) => {
+    const after = f.slice(h.e, idx + 1 < hits.length ? hits[idx + 1].s : Math.min(f.length, h.e + 80));
+    const before = f.slice(idx ? hits[idx - 1].e : Math.max(0, h.s - 20), h.s);
+    let size = '', price = h.c.price || 0;
+    for (const [k, v] of h.c.sizes) {
+      const num = (k.match(/\d+/) || [])[0];
+      if (new RegExp(WB + reEsc(k).replace(/ /g, '\\s*') + WE).test(after) ||
+          (num && new RegExp(`(?:size|sz|co|s)?\\s*${WB}${num}\\s*(?:cm|phan|p)?${WE}`).test(after))) {
+        size = v.size; price = v.price || price; break;
+      }
+    }
+    if (!size && h.c.sizes.size === 1) {            // món chỉ có 1 size thì lấy luôn size đó
+      const only = [...h.c.sizes.values()][0];
+      size = only.size; price = only.price || price;
+    }
+    if (!size) {
+      const m = after.match(/(?:size|sz|co)\s*(\d{1,2})\b|\b(\d{2})\s*cm\b/);
+      if (m) size = (m[1] || m[2]) + 'cm';
+    }
+    let qty = 1;
+    const own = after.split(/[,;\n+]|\bva\b/)[0];   // số lượng phải nằm trước dấu phẩy, không lấy của bánh sau
+    const qa = own.match(/(?:^|\s)x\s*(\d+)\b|\b(\d+)\s*(?:cai|chiec|banh|o|phan)\b|\bsl\s*:?\s*(\d+)/);
+    const qb = before.match(/\b(\d+)\s*(?:cai|chiec|banh|o|hop|phan)?\s*$/);
+    const words = { hai: 2, ba: 3, bon: 4, tu: 4, nam: 5, sau: 6, bay: 7, tam: 8, chin: 9, muoi: 10 };
+    const qw = before.match(/\b(hai|ba|bon|tu|nam|sau|bay|tam|chin|muoi)\s*(?:cai|chiec|banh|o|hop|phan)?\s*$/);
+    if (qa) qty = +(qa[1] || qa[2] || qa[3]);
+    else if (qb && !(idx && !qb[0].match(/[a-z]/) && (items[idx - 1].size.match(/\d+/) || [])[0] === qb[1])) qty = +qb[1]; // bỏ số là size của bánh trước
+    else if (qw) qty = words[qw[1]];
+    items.push({ cake: h.c.name, size, qty: Math.min(Math.max(qty, 1), 99), price, note: '' });
+  });
+
+  // 3. ngày giao
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const addDays = n => { const d = new Date(today); d.setDate(d.getDate() + n); return d; };
+  let date = null, m;
+  if ((m = f.match(/\b(\d{1,2})\s*[\/\-.]\s*(\d{1,2})(?:\s*[\/\-.]\s*(\d{2,4}))?\b/)) && +m[2] >= 1 && +m[2] <= 12) {
+    let y = m[3] ? +m[3] : today.getFullYear();
+    if (y < 100) y += 2000;
+    date = new Date(y, +m[2] - 1, +m[1]);
+    if (!m[3] && date < addDays(-30)) date.setFullYear(y + 1);
+  } else if (/\bhom nay\b|\btoi nay\b|\bchieu nay\b|\bsang nay\b/.test(f)) date = today;
+  else if (/\bngay mot\b|\bmot\s*(?:nha|nhe|nhen|a|nghen)?\s*(?:$|[.,!?\n])/.test(f)) date = addDays(2);
+  else if (/\b(?:ngay )?mai\b/.test(f)) date = addDays(1);
+  else if ((m = f.match(/\b(?:thu|t)\s*([2-7])\b|\b(chu nhat|cn)\b/))) {
+    const target = m[2] ? 0 : +m[1] - 1;               // 0 = CN, 1 = thứ 2, ... 6 = thứ 7
+    let ahead = (target - today.getDay() + 7) % 7;
+    if (/\btuan (?:sau|toi)\b/.test(f)) ahead = ((target + 6) % 7) - ((today.getDay() + 6) % 7) + 7;
+    date = addDays(ahead);
+  } else if ((m = f.match(/\bngay\s*(\d{1,2})\b/)) && +m[1] >= 1 && +m[1] <= 31) {
+    date = new Date(today.getFullYear(), today.getMonth(), +m[1]);
+    if (date < today) date.setMonth(date.getMonth() + 1);
+  }
+
+  // 4. SĐT, giờ giao, chữ ghi trên bánh
+  const phone = (text.match(/(?:\+?84|0)(?:[\s.\-]?\d){9}\b/) || [''])[0].replace(/[\s.\-]/g, '');
+  const notes = [];
+  const quoted = text.match(/["“”']([^"“”']{2,60})["“”']/);
+  const write = f.match(/\b(?:ghi chu|viet chu|ghi|chu\s*:)\s*:?\s*/);
+  if (quoted) notes.push('Chữ: ' + quoted[1].trim());
+  else if (write) notes.push('Chữ: ' + text.slice(write.index + write[0].length).split('\n')[0].trim());
+  const time = f.match(/\b(\d{1,2})\s*(?:h|g|gio)\s*(\d{2})?\s*(sang|trua|chieu|toi)?\b/);
+  if (time) notes.push('Giao ' + text.slice(time.index, time.index + time[0].length).trim());
+
+  const uncertain = ['Đọc bằng bộ offline, kiểm tra kỹ từng dòng.'];
+  if (!hits.length) uncertain.push('Không nhận ra tên bánh: thêm tên bánh và tên khách hay gọi tắt vào Menu & giá trong Cài đặt.');
+  return { customer: '', date: date ? iso(date) : '', contact: phone, note: notes.join('. '), items, uncertain: uncertain.join(' ') };
 }
 
 async function pasteAndParse() {
@@ -443,13 +581,13 @@ async function pasteAndParse() {
     return;
   }
   $('fRaw').value = text;
-  runAI([{ text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
+  runAI([{ text: 'TIN NHẮN CỦA KHÁCH:\n' + text }], text);
 }
 
 function parseText() {
   const text = $('fRaw').value.trim();
   if (!text) { $('aiMsg').textContent = 'Chưa có tin nhắn'; return; }
-  runAI([{ text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
+  runAI([{ text: 'TIN NHẮN CỦA KHÁCH:\n' + text }], text);
 }
 
 async function parseImage(e) {
@@ -458,7 +596,7 @@ async function parseImage(e) {
   if (!file) return;
   const data = await shrinkImage(file);
   runAI([{ inlineData: { mimeType: 'image/jpeg', data } },
-         { text: 'Ảnh chụp màn hình cuộc trò chuyện với khách ở trên.' }]);
+         { text: 'Ảnh chụp màn hình cuộc trò chuyện với khách ở trên.' }], null);
 }
 
 // thu nhỏ ảnh để gửi nhanh và rẻ hơn
