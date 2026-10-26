@@ -1,0 +1,753 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Đơn bánh</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Đơn bánh">
+<meta name="theme-color" content="#c0663a">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.json">
+<style>
+  :root {
+    --bg: #faf7f2; --card: #fff; --text: #2b2420; --muted: #8a7f76;
+    --line: #e8e0d6; --accent: #c0663a; --accent-soft: #f6e5da; --ok: #3d8b5a; --warn: #fff4d6;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, system-ui, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); font-size: 16px; }
+  header { background: var(--accent); color: #fff; padding: 12px 16px; padding-top: max(12px, env(safe-area-inset-top)); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; position: sticky; top: 0; z-index: 5; }
+  header h1 { font-size: 19px; margin: 0; flex: 1; }
+  header button { background: rgba(255,255,255,.18); color: #fff; border-color: transparent; }
+  #syncStatus { font-size: 12px; opacity: .9; width: 100%; }
+  main { max-width: 1100px; margin: 0 auto; padding: 16px; display: grid; gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; }
+  .card h2 { margin: 0 0 12px; font-size: 17px; }
+  label { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+  input, select, textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; font: inherit; font-size: 16px; background: #fff; color: var(--text); }
+  textarea { resize: vertical; min-height: 64px; }
+  .grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+  .item-row { display: grid; gap: 8px; grid-template-columns: 2fr 1fr 70px 110px 2fr 40px; align-items: end; margin-bottom: 8px; }
+  @media (max-width: 720px) {
+    .item-row { grid-template-columns: 1fr 1fr; padding-bottom: 10px; border-bottom: 1px dashed var(--line); }
+    .item-row > div:first-child, .item-row > div:nth-child(5) { grid-column: span 2; }
+  }
+  button { font: inherit; padding: 9px 14px; border-radius: 8px; border: 1px solid var(--line); background: #fff; cursor: pointer; color: var(--text); }
+  button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  button.big { padding: 14px 16px; font-size: 17px; font-weight: 600; flex: 1; }
+  button.small { padding: 5px 9px; font-size: 13px; }
+  button:disabled { opacity: .5; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .chips button { border-radius: 999px; padding: 6px 12px; font-size: 14px; }
+  .chips button.on { background: var(--accent-soft); border-color: var(--accent); }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 12px; overflow-x: auto; }
+  .tabs button { border: none; border-bottom: 3px solid transparent; border-radius: 0; background: none; padding: 8px 12px; white-space: nowrap; }
+  .tabs button.on { border-bottom-color: var(--accent); font-weight: 600; }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 13px; color: var(--muted); font-weight: 600; }
+  td.num, th.num { text-align: right; white-space: nowrap; }
+  tr.sub td { background: var(--accent-soft); font-weight: 600; }
+  tr.total td { font-weight: 700; border-top: 2px solid var(--text); }
+  .muted { color: var(--muted); font-size: 13px; }
+  .tag { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; background: var(--accent-soft); }
+  .tag.done { background: #e1f1e6; color: var(--ok); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 12px; }
+  .stat { background: var(--bg); border-radius: 8px; padding: 10px 12px; }
+  .stat b { display: block; font-size: 20px; }
+  .empty { text-align: center; color: var(--muted); padding: 24px; }
+  .notice { background: var(--warn); border-radius: 8px; padding: 10px 12px; font-size: 14px; margin-top: 10px; }
+  .notice:empty { display: none; }
+  dialog { border: none; border-radius: 14px; padding: 0; width: min(560px, calc(100vw - 32px)); max-height: 90vh; }
+  dialog::backdrop { background: rgba(0,0,0,.4); }
+  dialog .card { border: none; }
+  dialog .field { margin-bottom: 10px; }
+  @media print {
+    header, #formCard, .no-print { display: none !important; }
+    body { background: #fff; }
+    .card { border: none; padding: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🎂 Đơn bánh</h1>
+  <button class="small" onclick="sync()">↻</button>
+  <button class="small" onclick="openSettings()">⚙ Cài đặt</button>
+  <div id="syncStatus"></div>
+</header>
+
+<main>
+  <!-- Nhập đơn -->
+  <section class="card" id="formCard">
+    <h2 id="formTitle">Thêm đơn mới</h2>
+
+    <div class="row" style="margin-bottom:8px">
+      <button class="primary big" id="btnPaste" onclick="pasteAndParse()">📋 Dán tin nhắn</button>
+      <button class="big" onclick="$('imgInput').click()">🖼 Ảnh chụp</button>
+      <input type="file" id="imgInput" accept="image/*" hidden onchange="parseImage(event)">
+    </div>
+    <textarea id="fRaw" placeholder="Tin nhắn của khách sẽ hiện ở đây. Có thể gõ hoặc dán tay rồi bấm Đọc lại."></textarea>
+    <div class="row" style="margin-top:6px">
+      <button class="small" onclick="parseText()">🤖 Đọc lại bằng AI</button>
+      <span class="muted" id="aiMsg"></span>
+    </div>
+    <div class="notice" id="aiNotice"></div>
+
+    <div class="grid" style="margin-top:14px">
+      <div><label>Tên khách *</label><input id="fCustomer" list="dlCustomer" placeholder="Gõ trước để AI hiểu 'như lần trước'"></div>
+      <div><label>Ngày giao *</label><input type="date" id="fDate"></div>
+      <div><label>SĐT / địa chỉ</label><input id="fContact" placeholder="tuỳ chọn"></div>
+      <div><label>Trạng thái</label>
+        <select id="fStatus"><option value="new">Chưa giao</option><option value="done">Đã giao</option></select>
+      </div>
+    </div>
+
+    <h2 style="margin-top:16px">Bánh trong đơn</h2>
+    <div id="items"></div>
+    <button class="small" onclick="addItemRow()">+ Thêm bánh</button>
+
+    <div style="margin-top:12px"><label>Ghi chú đơn</label>
+      <textarea id="fNote" placeholder="Chữ trên bánh, giờ giao..."></textarea></div>
+
+    <div class="row" style="margin-top:12px">
+      <button class="primary big" onclick="saveOrder()">Lưu đơn</button>
+      <button onclick="resetForm()">Làm mới</button>
+    </div>
+    <div class="muted" id="formMsg" style="margin-top:6px"></div>
+  </section>
+
+  <!-- Xem & tổng hợp -->
+  <section class="card">
+    <div class="row no-print" style="margin-bottom:10px">
+      <div style="flex:1;min-width:130px"><label>Từ ngày</label><input type="date" id="from" onchange="clearChips();render()"></div>
+      <div style="flex:1;min-width:130px"><label>Đến ngày</label><input type="date" id="to" onchange="clearChips();render()"></div>
+      <div style="flex:2;min-width:160px"><label>Tìm (khách, bánh, ghi chú)</label><input id="q" oninput="render()"></div>
+    </div>
+    <div class="row chips no-print" id="chips" style="margin-bottom:12px">
+      <button data-r="today">Hôm nay</button>
+      <button data-r="tomorrow">Ngày mai</button>
+      <button data-r="week">Tuần này</button>
+      <button data-r="nextweek">Tuần sau</button>
+      <button data-r="month">Tháng này</button>
+      <button data-r="all">Tất cả</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+
+    <div class="tabs no-print">
+      <button data-t="cake" class="on">Theo loại bánh</button>
+      <button data-t="customer">Theo khách</button>
+      <button data-t="orders">Danh sách đơn</button>
+    </div>
+    <div class="table-wrap" id="view"></div>
+
+    <div class="row no-print" style="margin-top:14px">
+      <button class="small" onclick="exportCSV()">Xuất Excel (CSV)</button>
+      <button class="small" onclick="window.print()">In</button>
+      <button class="small" onclick="backup()">Tải file sao lưu</button>
+      <button class="small" onclick="$('restoreFile').click()">Nhập file sao lưu</button>
+      <input type="file" id="restoreFile" accept=".json" hidden onchange="restore(event)">
+    </div>
+  </section>
+</main>
+
+<dialog id="settings">
+  <div class="card">
+    <h2>Cài đặt</h2>
+    <p class="muted">Các mã bí mật chỉ lưu trên máy này. Mỗi máy (iPhone, máy tính) cần nhập 1 lần.</p>
+    <div class="field"><label>Tên tài khoản GitHub</label><input id="sOwner" autocapitalize="off" autocorrect="off"></div>
+    <div class="field"><label>Tên repo chứa dữ liệu (repo riêng tư)</label><input id="sRepo" autocapitalize="off" autocorrect="off" placeholder="donbanh-data"></div>
+    <div class="field"><label>GitHub token</label><input id="sToken" type="password" autocapitalize="off" placeholder="github_pat_..."></div>
+    <div class="field"><label>Claude API key</label><input id="sAiKey" type="password" autocapitalize="off" placeholder="sk-ant-..."></div>
+    <div class="field"><label>Menu &amp; giá (mỗi dòng một món, AI dùng để điền giá và gọi tên đồng nhất)</label>
+      <textarea id="sMenu" rows="6" placeholder="Bông lan trứng muối | 16cm | 350000&#10;Bông lan trứng muối | 20cm | 450000&#10;Su kem | hộp 10 | 60000"></textarea></div>
+    <div class="row">
+      <button class="primary" onclick="saveSettings()">Lưu &amp; kiểm tra</button>
+      <button onclick="$('settings').close()">Đóng</button>
+    </div>
+    <div class="muted" id="sMsg" style="margin-top:8px"></div>
+  </div>
+</dialog>
+
+<datalist id="dlCustomer"></datalist>
+<datalist id="dlCake"></datalist>
+<datalist id="dlSize"></datalist>
+
+<script>
+const KEY = 'donbanh-v2';
+const CFG_KEY = 'donbanh-cfg';
+const DATA_PATH = 'data.json';
+const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.132.1/+esm';
+const MODEL = 'claude-opus-5-5';
+
+let db = loadLocal();      // { menu, menuAt, orders: [...] } — gồm cả đơn đã xoá (deleted: true) để đồng bộ
+let cfg = loadJSON(CFG_KEY, {});
+let editingId = null;
+let tab = 'cake';
+
+// ---------- lưu trên máy ----------
+function loadJSON(k, fallback) {
+  try { return JSON.parse(localStorage.getItem(k)) ?? fallback; } catch { return fallback; }
+}
+function saveJSON(k, v) {
+  try { localStorage.setItem(k, JSON.stringify(v)); } catch {}
+}
+function loadLocal() {
+  const d = loadJSON(KEY, null);
+  if (d) return d;
+  // chuyển dữ liệu từ bản đầu tiên (chỉ lưu trên máy)
+  const old = loadJSON('tonghop-donbanh-v1', []);
+  return { menu: '', menuAt: 0, orders: old.map(o => ({ ...o, updatedAt: Date.now() })) };
+}
+const saveLocal = () => saveJSON(KEY, db);
+const live = () => db.orders.filter(o => !o.deleted);
+
+// ---------- tiện ích ----------
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const money = n => n ? Number(n).toLocaleString('vi-VN') + 'đ' : '';
+const norm = s => String(s || '').trim().replace(/\s+/g, ' ');
+const key = s => norm(s).toLowerCase();
+const iso = d => { const z = new Date(d); z.setMinutes(z.getMinutes() - z.getTimezoneOffset()); return z.toISOString().slice(0, 10); };
+const fmtDate = s => s ? s.split('-').reverse().join('/') : '';
+const parseMoney = s => Number(String(s || '').replace(/[^\d]/g, '')) || 0;
+const orderTotal = o => o.items.reduce((t, i) => t + i.qty * i.price, 0);
+const WEEKDAYS = ['Chủ nhật', 'Thứ 2', 'Thứ 3', 'Thứ 4', 'Thứ 5', 'Thứ 6', 'Thứ 7'];
+
+function changed() {
+  saveLocal();
+  render();
+  sync();
+}
+
+// ---------- đồng bộ GitHub ----------
+const ghReady = () => cfg.owner && cfg.repo && cfg.token;
+const ghUrl = () => `https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}/contents/${DATA_PATH}`;
+const ghHeaders = (accept = 'application/vnd.github+json') => ({
+  Authorization: `Bearer ${cfg.token}`, Accept: accept, 'X-GitHub-Api-Version': '2022-11-28',
+});
+
+function b64ToText(b64) {
+  const bin = atob(b64.replace(/\s/g, ''));
+  return new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0)));
+}
+function textToB64(text) {
+  const bytes = new TextEncoder().encode(text);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+async function ghGet() {
+  const res = await fetch(ghUrl(), { headers: ghHeaders(), cache: 'no-store' });
+  if (res.status === 404) return { sha: null, data: { menu: '', menuAt: 0, orders: [] } };
+  if (!res.ok) throw new Error(ghError(res.status));
+  const j = await res.json();
+  let text;
+  if (j.content) text = b64ToText(j.content);
+  else {
+    // file > 1MB: API không trả nội dung, phải lấy bản raw
+    const raw = await fetch(ghUrl(), { headers: ghHeaders('application/vnd.github.raw+json'), cache: 'no-store' });
+    if (!raw.ok) throw new Error(ghError(raw.status));
+    text = await raw.text();
+  }
+  return { sha: j.sha, data: JSON.parse(text) };
+}
+
+async function ghPut(data, sha) {
+  const res = await fetch(ghUrl(), {
+    method: 'PUT', headers: ghHeaders(), cache: 'no-store',
+    body: JSON.stringify({ message: `Cập nhật đơn ${new Date().toLocaleString('vi-VN')}`, content: textToB64(JSON.stringify(data)), ...(sha && { sha }) }),
+  });
+  if (res.status === 409 || res.status === 422) return false; // máy khác vừa ghi, lấy lại rồi thử lần nữa
+  if (!res.ok) throw new Error(ghError(res.status));
+  return true;
+}
+
+function ghError(status) {
+  if (status === 401) return 'GitHub token sai hoặc đã hết hạn';
+  if (status === 403) return 'GitHub token không có quyền ghi vào repo dữ liệu';
+  if (status === 404) return 'Không tìm thấy repo dữ liệu (kiểm tra tên tài khoản / tên repo / quyền của token)';
+  return 'Lỗi GitHub ' + status;
+}
+
+function merge(a, b) {
+  const map = new Map();
+  for (const o of [...(a.orders || []), ...(b.orders || [])]) {
+    const cur = map.get(o.id);
+    if (!cur || (o.updatedAt || 0) > (cur.updatedAt || 0)) map.set(o.id, o);
+  }
+  const menuSrc = (b.menuAt || 0) > (a.menuAt || 0) ? b : a;
+  return {
+    menu: menuSrc.menu || '', menuAt: menuSrc.menuAt || 0,
+    orders: [...map.values()].sort((x, y) => x.id.localeCompare(y.id)),
+  };
+}
+
+let syncing = false, syncAgain = false;
+async function sync() {
+  if (!ghReady()) { setSync('⚠ Chưa cài đặt đồng bộ: dữ liệu chỉ nằm trên máy này. Bấm ⚙ Cài đặt.'); return; }
+  if (syncing) { syncAgain = true; return; }
+  syncing = true;
+  setSync('Đang đồng bộ...');
+  try {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const remote = await ghGet();
+      db = merge(db, remote.data);
+      saveLocal(); render();
+      if (JSON.stringify(db) === JSON.stringify(merge(remote.data, { orders: [] }))) break;
+      if (await ghPut(db, remote.sha)) break;
+    }
+    setSync('✓ Đã đồng bộ lúc ' + new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' }));
+  } catch (e) {
+    setSync('⚠ Chưa đồng bộ được: ' + (e.message || 'mất mạng') + '. Đơn vẫn lưu trên máy, sẽ gửi lại sau.');
+  } finally {
+    syncing = false;
+    if (syncAgain) { syncAgain = false; sync(); }
+  }
+}
+const setSync = t => $('syncStatus').textContent = t;
+
+// ---------- AI đọc tin nhắn ----------
+const ORDER_SCHEMA = {
+  type: 'object',
+  properties: {
+    customer: { type: 'string' },
+    date: { type: 'string' },
+    contact: { type: 'string' },
+    note: { type: 'string' },
+    items: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          cake: { type: 'string' }, size: { type: 'string' }, qty: { type: 'integer' },
+          price: { type: 'integer' }, note: { type: 'string' },
+        },
+        required: ['cake', 'size', 'qty', 'price', 'note'],
+        additionalProperties: false,
+      },
+    },
+    uncertain: { type: 'string' },
+  },
+  required: ['customer', 'date', 'contact', 'note', 'items', 'uncertain'],
+  additionalProperties: false,
+};
+
+const SYSTEM_PROMPT = `Bạn giúp một tiệm bánh nhỏ nhập đơn hàng từ tin nhắn Messenger của khách. Đầu vào là văn bản tin nhắn được dán vào hoặc ảnh chụp màn hình cuộc trò chuyện. Hãy trích ra MỘT đơn hàng:
+- customer: tên khách nếu thấy trong ảnh hoặc tin nhắn, không thấy thì để "".
+- date: ngày giao dạng YYYY-MM-DD, suy ra từ cách nói như "mai", "thứ 7 này", "20/11" dựa vào ngày hôm nay được cung cấp. Không rõ thì "".
+- items: mỗi loại bánh + size là một dòng. qty mặc định 1. price là đơn giá VND (số nguyên): lấy giá đã báo trong tin nhắn nếu có, nếu không thì theo menu, không biết thì 0.
+- Khi tên bánh hoặc size cùng nghĩa với một tên trong menu hoặc danh sách đã dùng, hãy dùng ĐÚNG tên đó để thống kê không bị tách dòng.
+- item.note: vị, màu, trang trí riêng của bánh đó. note: chữ ghi trên bánh, giờ giao, nơi giao, yêu cầu chung.
+- contact: số điện thoại hoặc địa chỉ nếu có.
+- Nếu khách đổi ý giữa chừng, lấy nội dung chốt cuối cùng. Nếu khách nói "như lần trước", dựa vào các đơn cũ của khách được cung cấp.
+- uncertain: ghi ngắn gọn bằng tiếng Việt những điểm bạn không chắc để chủ tiệm kiểm tra lại; không có thì "".`;
+
+function buildContext() {
+  const all = live();
+  const uniq = arr => [...new Set(arr.filter(Boolean))].slice(0, 200);
+  const parts = [];
+  if (db.menu) parts.push('MENU CỦA TIỆM:\n' + db.menu);
+  parts.push('TÊN BÁNH ĐÃ DÙNG: ' + (uniq(all.flatMap(o => o.items.map(i => i.cake))).join('; ') || '(chưa có)'));
+  parts.push('SIZE ĐÃ DÙNG: ' + (uniq(all.flatMap(o => o.items.map(i => i.size))).join('; ') || '(chưa có)'));
+  const cust = key($('fCustomer').value);
+  if (cust) {
+    const past = all.filter(o => key(o.customer) === cust).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3);
+    if (past.length) parts.push(`CÁC ĐƠN GẦN ĐÂY CỦA KHÁCH "${$('fCustomer').value}":\n` +
+      past.map(o => `${o.date}: ` + o.items.map(i => `${i.qty} x ${i.cake} ${i.size} ${i.note}`).join(', ') + (o.note ? ` (ghi chú: ${o.note})` : '')).join('\n'));
+  }
+  const d = new Date();
+  parts.push(`HÔM NAY: ${WEEKDAYS[d.getDay()]}, ${iso(d)}`);
+  return parts.join('\n\n');
+}
+
+async function aiParse(content) {
+  if (!cfg.aiKey) { openSettings(); throw new Error('Cần nhập Claude API key trong Cài đặt'); }
+  const { default: Anthropic } = await import(SDK_URL);
+  const client = new Anthropic({ apiKey: cfg.aiKey, dangerouslyAllowBrowser: true });
+  let res;
+  try {
+    res = await client.beta.messages.create({
+      model: MODEL,
+      max_tokens: 16000,
+      betas: ['server-side-fallback-2026-07-01'],
+      fallbacks: 'default',
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: ORDER_SCHEMA } },
+      system: SYSTEM_PROMPT,
+      messages: [{ role: 'user', content: [...content, { type: 'text', text: buildContext() }] }],
+    });
+  } catch (e) {
+    if (e instanceof Anthropic.AuthenticationError) throw new Error('Claude API key sai');
+    if (e instanceof Anthropic.PermissionDeniedError) throw new Error('API key không có quyền, hoặc tài khoản hết tiền');
+    if (e instanceof Anthropic.RateLimitError) throw new Error('Gửi quá nhanh, đợi vài giây rồi thử lại');
+    if (e instanceof Anthropic.APIConnectionError) throw new Error('Không kết nối được, kiểm tra mạng');
+    if (e instanceof Anthropic.APIError) throw new Error('Lỗi AI ' + (e.status || '') + ': ' + e.message);
+    throw e;
+  }
+  if (res.stop_reason === 'refusal') throw new Error('AI không xử lý được tin nhắn này, hãy nhập tay');
+  if (res.stop_reason === 'max_tokens') throw new Error('Tin nhắn quá dài, hãy cắt bớt');
+  const text = res.content.find(b => b.type === 'text')?.text;
+  return JSON.parse(text);
+}
+
+async function runAI(content) {
+  $('aiMsg').textContent = '🤖 Đang đọc...';
+  $('aiNotice').textContent = '';
+  $('btnPaste').disabled = true;
+  try {
+    fillFromAI(await aiParse(content));
+    $('aiMsg').textContent = '✓ Đã điền sẵn, kiểm tra rồi bấm Lưu đơn';
+  } catch (e) {
+    $('aiMsg').textContent = '⚠ ' + (e.message || 'Lỗi');
+  } finally {
+    $('btnPaste').disabled = false;
+  }
+}
+
+async function pasteAndParse() {
+  let text = '';
+  try { text = await navigator.clipboard.readText(); } catch {}
+  if (!norm(text)) {
+    $('fRaw').focus();
+    $('aiMsg').textContent = 'Nhấn giữ vào ô trên, chọn Dán, rồi bấm "Đọc lại bằng AI"';
+    return;
+  }
+  $('fRaw').value = text;
+  runAI([{ type: 'text', text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
+}
+
+function parseText() {
+  const text = $('fRaw').value.trim();
+  if (!text) { $('aiMsg').textContent = 'Chưa có tin nhắn'; return; }
+  runAI([{ type: 'text', text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
+}
+
+async function parseImage(e) {
+  const file = e.target.files[0];
+  e.target.value = '';
+  if (!file) return;
+  const data = await shrinkImage(file);
+  runAI([{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
+         { type: 'text', text: 'Ảnh chụp màn hình cuộc trò chuyện với khách ở trên.' }]);
+}
+
+// thu nhỏ ảnh để gửi nhanh và rẻ hơn
+function shrinkImage(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, 1568 / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(img.src);
+      resolve(c.toDataURL('image/jpeg', 0.85).split(',')[1]);
+    };
+    img.onerror = reject;
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+function fillFromAI(r) {
+  if (r.customer && !norm($('fCustomer').value)) {
+    const known = live().find(o => key(o.customer) === key(r.customer));
+    $('fCustomer').value = known ? known.customer : r.customer;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(r.date)) $('fDate').value = r.date;
+  if (r.contact) $('fContact').value = r.contact;
+  if (r.note) $('fNote').value = r.note;
+  if (r.items?.length) {
+    $('items').innerHTML = '';
+    r.items.forEach(addItemRow);
+  }
+  const warn = [];
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(r.date)) warn.push('Chưa rõ ngày giao, đang để mặc định hôm nay.');
+  if (!norm($('fCustomer').value)) warn.push('Chưa có tên khách.');
+  if (r.uncertain) warn.push(r.uncertain);
+  $('aiNotice').textContent = warn.length ? '⚠ ' + warn.join(' ') : '';
+}
+
+// ---------- form ----------
+function addItemRow(it = {}) {
+  const div = document.createElement('div');
+  div.className = 'item-row';
+  div.innerHTML = `
+    <div><label>Loại bánh *</label><input class="iCake" list="dlCake" value="${esc(it.cake)}" placeholder="VD: Bông lan trứng muối"></div>
+    <div><label>Size</label><input class="iSize" list="dlSize" value="${esc(it.size)}" placeholder="VD: 16cm"></div>
+    <div><label>SL</label><input class="iQty" type="number" inputmode="numeric" min="1" value="${it.qty || 1}"></div>
+    <div><label>Đơn giá</label><input class="iPrice" inputmode="numeric" value="${it.price ? Number(it.price).toLocaleString('vi-VN') : ''}" placeholder="350.000"></div>
+    <div><label>Mô tả</label><input class="iNote" value="${esc(it.note)}" placeholder="vị, màu, chữ..."></div>
+    <div><button class="small" title="Xoá dòng" onclick="this.closest('.item-row').remove()">✕</button></div>`;
+  $('items').appendChild(div);
+}
+
+function resetForm() {
+  editingId = null;
+  $('formTitle').textContent = 'Thêm đơn mới';
+  $('fDate').value = iso(new Date());
+  ['fCustomer', 'fContact', 'fNote', 'fRaw'].forEach(id => $(id).value = '');
+  $('fStatus').value = 'new';
+  $('items').innerHTML = '';
+  addItemRow();
+  $('formMsg').textContent = '';
+  $('aiMsg').textContent = '';
+  $('aiNotice').textContent = '';
+}
+
+function saveOrder() {
+  const items = [...document.querySelectorAll('#items .item-row')].map(r => ({
+    cake: norm(r.querySelector('.iCake').value),
+    size: norm(r.querySelector('.iSize').value),
+    qty: Math.max(1, parseInt(r.querySelector('.iQty').value) || 1),
+    price: parseMoney(r.querySelector('.iPrice').value),
+    note: norm(r.querySelector('.iNote').value),
+  })).filter(i => i.cake);
+
+  const o = {
+    id: editingId || Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+    date: $('fDate').value,
+    customer: norm($('fCustomer').value),
+    contact: norm($('fContact').value),
+    status: $('fStatus').value,
+    note: $('fNote').value.trim(),
+    items,
+    updatedAt: Date.now(),
+  };
+  if (!o.date || !o.customer || !items.length) {
+    $('formMsg').textContent = '⚠ Cần nhập ngày giao, tên khách và ít nhất 1 loại bánh.';
+    return;
+  }
+  if (editingId) db.orders = db.orders.map(x => x.id === editingId ? o : x);
+  else db.orders.push(o);
+  const who = o.customer;
+  resetForm();
+  $('formMsg').textContent = `✓ Đã lưu đơn của ${who}.`;
+  changed();
+}
+
+function editOrder(id) {
+  const o = db.orders.find(x => x.id === id);
+  if (!o) return;
+  resetForm();
+  editingId = id;
+  $('formTitle').textContent = 'Sửa đơn của ' + o.customer;
+  $('fDate').value = o.date;
+  $('fCustomer').value = o.customer;
+  $('fContact').value = o.contact || '';
+  $('fStatus').value = o.status;
+  $('fNote').value = o.note || '';
+  $('items').innerHTML = '';
+  o.items.forEach(addItemRow);
+  $('formCard').scrollIntoView({ behavior: 'smooth' });
+}
+
+function deleteOrder(id) {
+  const o = db.orders.find(x => x.id === id);
+  if (!o || !confirm(`Xoá đơn của ${o.customer} (${fmtDate(o.date)})?`)) return;
+  o.deleted = true; o.updatedAt = Date.now();
+  changed();
+}
+
+function toggleStatus(id) {
+  const o = db.orders.find(x => x.id === id);
+  o.status = o.status === 'done' ? 'new' : 'done';
+  o.updatedAt = Date.now();
+  changed();
+}
+
+// ---------- cài đặt ----------
+function openSettings() {
+  $('sOwner').value = cfg.owner || '';
+  $('sRepo').value = cfg.repo || 'donbanh-data';
+  $('sToken').value = cfg.token || '';
+  $('sAiKey').value = cfg.aiKey || '';
+  $('sMenu').value = db.menu || '';
+  $('sMsg').textContent = '';
+  $('settings').showModal();
+}
+
+async function saveSettings() {
+  cfg = { owner: norm($('sOwner').value), repo: norm($('sRepo').value), token: $('sToken').value.trim(), aiKey: $('sAiKey').value.trim() };
+  saveJSON(CFG_KEY, cfg);
+  if ($('sMenu').value.trim() !== (db.menu || '').trim()) {
+    db.menu = $('sMenu').value.trim(); db.menuAt = Date.now(); saveLocal();
+  }
+  $('sMsg').textContent = 'Đang kiểm tra GitHub...';
+  if (ghReady()) {
+    try { await ghGet(); $('sMsg').textContent = '✓ Kết nối GitHub được.'; }
+    catch (e) { $('sMsg').textContent = '⚠ ' + e.message; return; }
+  } else $('sMsg').textContent = 'Chưa nhập đủ thông tin GitHub, dữ liệu chỉ lưu trên máy này.';
+  sync();
+}
+
+// ---------- lọc ngày ----------
+function setRange(r) {
+  const d = new Date(); d.setHours(0, 0, 0, 0);
+  const monday = new Date(d); monday.setDate(d.getDate() - ((d.getDay() + 6) % 7));
+  const add = (base, n) => { const x = new Date(base); x.setDate(x.getDate() + n); return x; };
+  const ranges = {
+    today: [d, d],
+    tomorrow: [add(d, 1), add(d, 1)],
+    week: [monday, add(monday, 6)],
+    nextweek: [add(monday, 7), add(monday, 13)],
+    month: [new Date(d.getFullYear(), d.getMonth(), 1), new Date(d.getFullYear(), d.getMonth() + 1, 0)],
+    all: [null, null],
+  };
+  const [a, b] = ranges[r];
+  $('from').value = a ? iso(a) : '';
+  $('to').value = b ? iso(b) : '';
+  document.querySelectorAll('#chips [data-r]').forEach(btn => btn.classList.toggle('on', btn.dataset.r === r));
+  render();
+}
+function clearChips() { document.querySelectorAll('#chips [data-r]').forEach(b => b.classList.remove('on')); }
+
+function filtered() {
+  const from = $('from').value, to = $('to').value, q = key($('q').value);
+  return live().filter(o =>
+    (!from || o.date >= from) && (!to || o.date <= to) &&
+    (!q || key([o.customer, o.contact, o.note, ...o.items.flatMap(i => [i.cake, i.size, i.note])].join(' ')).includes(q))
+  ).sort((a, b) => a.date.localeCompare(b.date) || a.customer.localeCompare(b.customer));
+}
+
+// ---------- hiển thị ----------
+function render() {
+  const list = filtered();
+  const totalQty = list.reduce((t, o) => t + o.items.reduce((s, i) => s + i.qty, 0), 0);
+  const revenue = list.reduce((t, o) => t + orderTotal(o), 0);
+  const customers = new Set(list.map(o => key(o.customer))).size;
+  const pending = list.filter(o => o.status !== 'done').length;
+  $('stats').innerHTML = `
+    <div class="stat"><span class="muted">Số đơn</span><b>${list.length}</b></div>
+    <div class="stat"><span class="muted">Số khách</span><b>${customers}</b></div>
+    <div class="stat"><span class="muted">Tổng số bánh</span><b>${totalQty}</b></div>
+    <div class="stat"><span class="muted">Chưa giao</span><b>${pending}</b></div>
+    <div class="stat"><span class="muted">Doanh thu</span><b>${money(revenue) || '0đ'}</b></div>`;
+
+  if (!list.length) $('view').innerHTML = '<div class="empty">Không có đơn nào trong khoảng ngày này.</div>';
+  else $('view').innerHTML = { cake: viewCake, customer: viewCustomer, orders: viewOrders }[tab](list);
+  refreshSuggestions();
+}
+
+function viewCake(list) {
+  // gom theo loại bánh -> size
+  const groups = new Map();
+  for (const o of list) for (const i of o.items) {
+    const ck = key(i.cake);
+    if (!groups.has(ck)) groups.set(ck, { name: i.cake, sizes: new Map() });
+    const g = groups.get(ck), sk = key(i.size);
+    if (!g.sizes.has(sk)) g.sizes.set(sk, { size: i.size, qty: 0, money: 0, who: [] });
+    const s = g.sizes.get(sk);
+    s.qty += i.qty; s.money += i.qty * i.price;
+    s.who.push(`${o.customer} (${i.qty}${i.note ? ', ' + i.note : ''})`);
+  }
+  let html = '<table><tr><th>Loại bánh</th><th>Size</th><th class="num">SL</th><th class="num">Thành tiền</th><th>Khách đặt</th></tr>';
+  let tq = 0, tm = 0;
+  [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(g => {
+    let gq = 0, gm = 0;
+    const sizes = [...g.sizes.values()].sort((a, b) => a.size.localeCompare(b.size, 'vi', { numeric: true }));
+    sizes.forEach((s, idx) => {
+      gq += s.qty; gm += s.money;
+      html += `<tr><td>${idx ? '' : '<b>' + esc(g.name) + '</b>'}</td><td>${esc(s.size) || '<span class="muted">—</span>'}</td>
+        <td class="num"><b>${s.qty}</b></td><td class="num">${money(s.money)}</td><td class="muted">${esc(s.who.join('; '))}</td></tr>`;
+    });
+    if (sizes.length > 1) html += `<tr class="sub"><td colspan="2">Cộng ${esc(g.name)}</td><td class="num">${gq}</td><td class="num">${money(gm)}</td><td></td></tr>`;
+    tq += gq; tm += gm;
+  });
+  return html + `<tr class="total"><td colspan="2">TỔNG CỘNG</td><td class="num">${tq}</td><td class="num">${money(tm)}</td><td></td></tr></table>`;
+}
+
+function viewCustomer(list) {
+  const groups = new Map();
+  for (const o of list) {
+    const k = key(o.customer);
+    if (!groups.has(k)) groups.set(k, { name: o.customer, contact: o.contact, orders: [] });
+    groups.get(k).orders.push(o);
+  }
+  let html = '<table><tr><th>Khách</th><th>Ngày giao</th><th>Đặt gì</th><th class="num">Tiền</th></tr>';
+  [...groups.values()].sort((a, b) => a.name.localeCompare(b.name)).forEach(g => {
+    let sum = 0;
+    g.orders.forEach((o, idx) => {
+      const t = orderTotal(o); sum += t;
+      html += `<tr><td>${idx ? '' : '<b>' + esc(g.name) + '</b><br><span class="muted">' + esc(g.contact || '') + '</span>'}</td>
+        <td>${fmtDate(o.date)} ${o.status === 'done' ? '<span class="tag done">đã giao</span>' : ''}</td>
+        <td>${itemsText(o)}${o.note ? '<div class="muted">📝 ' + esc(o.note) + '</div>' : ''}</td>
+        <td class="num">${money(t)}</td></tr>`;
+    });
+    if (g.orders.length > 1) html += `<tr class="sub"><td colspan="3">Cộng ${esc(g.name)} (${g.orders.length} đơn)</td><td class="num">${money(sum)}</td></tr>`;
+  });
+  return html + '</table>';
+}
+
+function viewOrders(list) {
+  let html = '<table><tr><th>Ngày giao</th><th>Khách</th><th>Bánh</th><th class="num">Tiền</th><th>Trạng thái</th><th class="no-print"></th></tr>';
+  list.forEach(o => {
+    html += `<tr><td>${fmtDate(o.date)}</td><td><b>${esc(o.customer)}</b><br><span class="muted">${esc(o.contact || '')}</span></td>
+      <td>${itemsText(o)}${o.note ? '<div class="muted">📝 ' + esc(o.note) + '</div>' : ''}</td>
+      <td class="num">${money(orderTotal(o))}</td>
+      <td><button class="small" onclick="toggleStatus('${o.id}')">${o.status === 'done' ? '<span class="tag done">Đã giao</span>' : '<span class="tag">Chưa giao</span>'}</button></td>
+      <td class="no-print" style="white-space:nowrap"><button class="small" onclick="editOrder('${o.id}')">Sửa</button>
+        <button class="small" onclick="deleteOrder('${o.id}')">Xoá</button></td></tr>`;
+  });
+  return html + '</table>';
+}
+
+function itemsText(o) {
+  return o.items.map(i => `• <b>${i.qty}</b> × ${esc(i.cake)}${i.size ? ' <span class="tag">' + esc(i.size) + '</span>' : ''}${i.note ? ' <span class="muted">(' + esc(i.note) + ')</span>' : ''}`).join('<br>');
+}
+
+function refreshSuggestions() {
+  const all = live();
+  const uniq = arr => [...new Map(arr.filter(Boolean).map(v => [key(v), v])).values()].sort();
+  const fill = (id, vals) => $(id).innerHTML = vals.map(v => `<option value="${esc(v)}">`).join('');
+  fill('dlCustomer', uniq(all.map(o => o.customer)));
+  fill('dlCake', uniq(all.flatMap(o => o.items.map(i => i.cake))));
+  fill('dlSize', uniq(all.flatMap(o => o.items.map(i => i.size))));
+}
+
+// ---------- xuất / sao lưu ----------
+function download(name, content, type) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([content], { type }));
+  a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+function exportCSV() {
+  const q = v => '"' + String(v ?? '').replace(/"/g, '""') + '"';
+  const rows = [['Ngày giao', 'Khách', 'Liên hệ', 'Loại bánh', 'Size', 'Số lượng', 'Đơn giá', 'Thành tiền', 'Mô tả', 'Ghi chú đơn', 'Trạng thái']];
+  filtered().forEach(o => o.items.forEach(i => rows.push([fmtDate(o.date), o.customer, o.contact, i.cake, i.size, i.qty, i.price, i.qty * i.price, i.note, o.note, o.status === 'done' ? 'Đã giao' : 'Chưa giao'])));
+  download(`don-banh_${$('from').value || 'all'}_${$('to').value || 'all'}.csv`, '\uFEFF' + rows.map(r => r.map(q).join(',')).join('\r\n'), 'text/csv;charset=utf-8');
+}
+function backup() {
+  download(`saoluu-donbanh_${iso(new Date())}.json`, JSON.stringify(db, null, 1), 'application/json');
+}
+function restore(e) {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => {
+    const data = JSON.parse(t);
+    const incoming = Array.isArray(data) ? { orders: data } : data; // nhận cả file sao lưu của bản đầu
+    if (!Array.isArray(incoming.orders)) throw new Error();
+    if (!confirm(`Gộp ${incoming.orders.length} đơn từ file sao lưu vào dữ liệu hiện tại?`)) return;
+    incoming.orders.forEach(o => o.updatedAt ??= Date.now());
+    db = merge(db, incoming);
+    changed();
+  }).catch(() => alert('File sao lưu không hợp lệ.')).finally(() => e.target.value = '');
+}
+
+// ---------- khởi động ----------
+document.querySelectorAll('#chips [data-r]').forEach(b => b.onclick = () => setRange(b.dataset.r));
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  tab = b.dataset.t;
+  document.querySelectorAll('.tabs button').forEach(x => x.classList.toggle('on', x === b));
+  render();
+});
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') sync(); });
+resetForm();
+setRange('week');
+sync();
+</script>
+</body>
+</html>

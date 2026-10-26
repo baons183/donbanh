@@ -1,0 +1,9 @@
+{
+  "name": "Đơn bánh",
+  "short_name": "Đơn bánh",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#faf7f2",
+  "theme_color": "#c0663a",
+  "icons": [{ "src": "icon.png", "sizes": "180x180", "type": "image/png" }]
+}
