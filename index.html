@@ -241,7 +241,17 @@ function textToB64(text) {
   return btoa(bin);
 }
 
+let repoChecked = false;
+async function ghCheckPrivate() {
+  if (repoChecked) return;
+  const res = await fetch(`https://api.github.com/repos/${encodeURIComponent(cfg.owner)}/${encodeURIComponent(cfg.repo)}`, { headers: ghHeaders(), cache: 'no-store' });
+  if (!res.ok) throw new Error(ghError(res.status));
+  if (!(await res.json()).private) throw new Error(`Repo "${cfg.repo}" đang công khai, ai cũng xem được đơn của khách. Vào GitHub → repo → Settings → Change visibility → Private`);
+  repoChecked = true;
+}
+
 async function ghGet() {
+  await ghCheckPrivate();
   const res = await fetch(ghUrl(), { headers: ghHeaders(), cache: 'no-store' });
   if (res.status === 404) return { sha: null, data: { menu: '', menuAt: 0, orders: [] } };
   if (!res.ok) throw new Error(ghError(res.status));
@@ -573,6 +583,7 @@ function openSettings() {
 async function saveSettings() {
   cfg = { owner: norm($('sOwner').value), repo: norm($('sRepo').value), token: $('sToken').value.trim(), aiKey: $('sAiKey').value.trim() };
   saveJSON(CFG_KEY, cfg);
+  repoChecked = false;
   if ($('sMenu').value.trim() !== (db.menu || '').trim()) {
     db.menu = $('sMenu').value.trim(); db.menuAt = Date.now(); saveLocal();
   }
