@@ -161,7 +161,7 @@
     <div class="field"><label>Tên tài khoản GitHub</label><input id="sOwner" autocapitalize="off" autocorrect="off"></div>
     <div class="field"><label>Tên repo chứa dữ liệu (repo riêng tư)</label><input id="sRepo" autocapitalize="off" autocorrect="off" placeholder="donbanh-data"></div>
     <div class="field"><label>GitHub token</label><input id="sToken" type="password" autocapitalize="off" placeholder="github_pat_..."></div>
-    <div class="field"><label>Claude API key</label><input id="sAiKey" type="password" autocapitalize="off" placeholder="sk-ant-..."></div>
+    <div class="field"><label>Gemini API key (lấy miễn phí tại aistudio.google.com)</label><input id="sAiKey" type="password" autocapitalize="off" placeholder="AIza..."></div>
     <div class="field"><label>Menu &amp; giá (mỗi dòng một món, AI dùng để điền giá và gọi tên đồng nhất)</label>
       <textarea id="sMenu" rows="6" placeholder="Bông lan trứng muối | 16cm | 350000&#10;Bông lan trứng muối | 20cm | 450000&#10;Su kem | hộp 10 | 60000"></textarea></div>
     <div class="row">
@@ -180,8 +180,8 @@
 const KEY = 'donbanh-v2';
 const CFG_KEY = 'donbanh-cfg';
 const DATA_PATH = 'data.json';
-const SDK_URL = 'https://cdn.jsdelivr.net/npm/@anthropic-ai/sdk@0.132.1/+esm';
-const MODEL = 'claude-opus-5-5';
+// thử lần lượt: nếu Google ngừng mô hình đầu thì dùng mô hình sau
+const GEMINI_MODELS = ['gemini-3.8-flash', 'gemini-3.5-flash-lite'];
 
 let db = loadLocal();      // { menu, menuAt, orders: [...] } — gồm cả đơn đã xoá (deleted: true) để đồng bộ
 let cfg = loadJSON(CFG_KEY, {});
@@ -323,28 +323,26 @@ const setSync = t => $('syncStatus').textContent = t;
 
 // ---------- AI đọc tin nhắn ----------
 const ORDER_SCHEMA = {
-  type: 'object',
+  type: 'OBJECT',
   properties: {
-    customer: { type: 'string' },
-    date: { type: 'string' },
-    contact: { type: 'string' },
-    note: { type: 'string' },
+    customer: { type: 'STRING' },
+    date: { type: 'STRING' },
+    contact: { type: 'STRING' },
+    note: { type: 'STRING' },
     items: {
-      type: 'array',
+      type: 'ARRAY',
       items: {
-        type: 'object',
+        type: 'OBJECT',
         properties: {
-          cake: { type: 'string' }, size: { type: 'string' }, qty: { type: 'integer' },
-          price: { type: 'integer' }, note: { type: 'string' },
+          cake: { type: 'STRING' }, size: { type: 'STRING' }, qty: { type: 'INTEGER' },
+          price: { type: 'INTEGER' }, note: { type: 'STRING' },
         },
         required: ['cake', 'size', 'qty', 'price', 'note'],
-        additionalProperties: false,
       },
     },
-    uncertain: { type: 'string' },
+    uncertain: { type: 'STRING' },
   },
   required: ['customer', 'date', 'contact', 'note', 'items', 'uncertain'],
-  additionalProperties: false,
 };
 
 const SYSTEM_PROMPT = `Bạn giúp một tiệm bánh nhỏ nhập đơn hàng từ tin nhắn Messenger của khách. Đầu vào là văn bản tin nhắn được dán vào hoặc ảnh chụp màn hình cuộc trò chuyện. Hãy trích ra MỘT đơn hàng:
@@ -375,32 +373,37 @@ function buildContext() {
   return parts.join('\n\n');
 }
 
-async function aiParse(content) {
-  if (!cfg.aiKey) { openSettings(); throw new Error('Cần nhập Claude API key trong Cài đặt'); }
-  const { default: Anthropic } = await import(SDK_URL);
-  const client = new Anthropic({ apiKey: cfg.aiKey, dangerouslyAllowBrowser: true });
-  let res;
-  try {
-    res = await client.beta.messages.create({
-      model: MODEL,
-      max_tokens: 16000,
-      betas: ['server-side-fallback-2026-07-01'],
-      fallbacks: 'default',
-      output_config: { effort: 'low', format: { type: 'json_schema', schema: ORDER_SCHEMA } },
-      system: SYSTEM_PROMPT,
-      messages: [{ role: 'user', content: [...content, { type: 'text', text: buildContext() }] }],
-    });
-  } catch (e) {
-    if (e instanceof Anthropic.AuthenticationError) throw new Error('Claude API key sai');
-    if (e instanceof Anthropic.PermissionDeniedError) throw new Error('API key không có quyền, hoặc tài khoản hết tiền');
-    if (e instanceof Anthropic.RateLimitError) throw new Error('Gửi quá nhanh, đợi vài giây rồi thử lại');
-    if (e instanceof Anthropic.APIConnectionError) throw new Error('Không kết nối được, kiểm tra mạng');
-    if (e instanceof Anthropic.APIError) throw new Error('Lỗi AI ' + (e.status || '') + ': ' + e.message);
-    throw e;
+async function aiParse(parts) {
+  if (!cfg.geminiKey) { openSettings(); throw new Error('Cần nhập Gemini API key trong Cài đặt'); }
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+    contents: [{ role: 'user', parts: [...parts, { text: buildContext() }] }],
+    generationConfig: { responseMimeType: 'application/json', responseSchema: ORDER_SCHEMA },
+  });
+  let res, data;
+  for (const model of GEMINI_MODELS) {
+    try {
+      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey },
+        body,
+      });
+    } catch { throw new Error('Không kết nối được, kiểm tra mạng'); }
+    data = await res.json().catch(() => ({}));
+    if (res.status !== 404) break; // 404 = mô hình không còn, thử mô hình tiếp theo
   }
-  if (res.stop_reason === 'refusal') throw new Error('AI không xử lý được tin nhắn này, hãy nhập tay');
-  if (res.stop_reason === 'max_tokens') throw new Error('Tin nhắn quá dài, hãy cắt bớt');
-  const text = res.content.find(b => b.type === 'text')?.text;
+  if (!res.ok) {
+    const msg = data.error?.message || '';
+    if (res.status === 400 && /api key/i.test(msg)) throw new Error('Gemini API key sai');
+    if (res.status === 403) throw new Error('API key không có quyền dùng Gemini');
+    if (res.status === 429) throw new Error('Hết lượt miễn phí tạm thời, đợi một lúc rồi thử lại (hoặc nhập tay)');
+    throw new Error('Lỗi AI ' + res.status + (msg ? ': ' + msg : ''));
+  }
+  if (data.promptFeedback?.blockReason) throw new Error('AI không xử lý được tin nhắn này, hãy nhập tay');
+  const cand = data.candidates?.[0];
+  if (cand?.finishReason === 'MAX_TOKENS') throw new Error('Tin nhắn quá dài, hãy cắt bớt');
+  const text = (cand?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('');
+  if (!text) throw new Error('AI không trả kết quả, hãy thử lại hoặc nhập tay');
   return JSON.parse(text);
 }
 
@@ -427,13 +430,13 @@ async function pasteAndParse() {
     return;
   }
   $('fRaw').value = text;
-  runAI([{ type: 'text', text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
+  runAI([{ text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
 }
 
 function parseText() {
   const text = $('fRaw').value.trim();
   if (!text) { $('aiMsg').textContent = 'Chưa có tin nhắn'; return; }
-  runAI([{ type: 'text', text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
+  runAI([{ text: 'TIN NHẮN CỦA KHÁCH:\n' + text }]);
 }
 
 async function parseImage(e) {
@@ -441,8 +444,8 @@ async function parseImage(e) {
   e.target.value = '';
   if (!file) return;
   const data = await shrinkImage(file);
-  runAI([{ type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data } },
-         { type: 'text', text: 'Ảnh chụp màn hình cuộc trò chuyện với khách ở trên.' }]);
+  runAI([{ inlineData: { mimeType: 'image/jpeg', data } },
+         { text: 'Ảnh chụp màn hình cuộc trò chuyện với khách ở trên.' }]);
 }
 
 // thu nhỏ ảnh để gửi nhanh và rẻ hơn
@@ -574,14 +577,14 @@ function openSettings() {
   $('sOwner').value = cfg.owner || '';
   $('sRepo').value = cfg.repo || 'donbanh-data';
   $('sToken').value = cfg.token || '';
-  $('sAiKey').value = cfg.aiKey || '';
+  $('sAiKey').value = cfg.geminiKey || '';
   $('sMenu').value = db.menu || '';
   $('sMsg').textContent = '';
   $('settings').showModal();
 }
 
 async function saveSettings() {
-  cfg = { owner: norm($('sOwner').value), repo: norm($('sRepo').value), token: $('sToken').value.trim(), aiKey: $('sAiKey').value.trim() };
+  cfg = { owner: norm($('sOwner').value), repo: norm($('sRepo').value), token: $('sToken').value.trim(), geminiKey: $('sAiKey').value.trim() };
   saveJSON(CFG_KEY, cfg);
   repoChecked = false;
   if ($('sMenu').value.trim() !== (db.menu || '').trim()) {
