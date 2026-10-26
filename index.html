@@ -380,23 +380,36 @@ async function aiParse(parts) {
     contents: [{ role: 'user', parts: [...parts, { text: buildContext() }] }],
     generationConfig: { responseMimeType: 'application/json', responseSchema: ORDER_SCHEMA },
   });
+  // 404 = mô hình không còn; 429/500/503 = Google đang quá tải hoặc hết lượt miễn phí của mô hình đó.
+  // Gặp các lỗi này thì đợi rồi thử lại, sau đó chuyển sang mô hình dự phòng.
+  const RETRY = [429, 500, 503, 504];
   let res, data;
+  outer:
   for (const model of GEMINI_MODELS) {
-    try {
-      res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey },
-        body,
-      });
-    } catch { throw new Error('Không kết nối được, kiểm tra mạng'); }
-    data = await res.json().catch(() => ({}));
-    if (res.status !== 404) break; // 404 = mô hình không còn, thử mô hình tiếp theo
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (attempt) {
+        $('aiMsg').textContent = `🤖 Google đang bận, thử lại lần ${attempt}...`;
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      }
+      try {
+        res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'x-goog-api-key': cfg.geminiKey },
+          body,
+        });
+      } catch { throw new Error('Không kết nối được, kiểm tra mạng'); }
+      data = await res.json().catch(() => ({}));
+      if (res.ok) break outer;
+      if (res.status === 404) break;          // sang mô hình tiếp theo
+      if (!RETRY.includes(res.status)) break outer;
+    }
   }
   if (!res.ok) {
     const msg = data.error?.message || '';
     if (res.status === 400 && /api key/i.test(msg)) throw new Error('Gemini API key sai');
     if (res.status === 403) throw new Error('API key không có quyền dùng Gemini');
     if (res.status === 429) throw new Error('Hết lượt miễn phí tạm thời, đợi một lúc rồi thử lại (hoặc nhập tay)');
+    if (RETRY.includes(res.status)) throw new Error('Máy chủ Google đang quá tải, đợi vài phút rồi bấm "Đọc lại bằng AI" (hoặc nhập tay)');
     throw new Error('Lỗi AI ' + res.status + (msg ? ': ' + msg : ''));
   }
   if (data.promptFeedback?.blockReason) throw new Error('AI không xử lý được tin nhắn này, hãy nhập tay');
